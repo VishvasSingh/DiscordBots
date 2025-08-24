@@ -5,8 +5,17 @@ import random
 import logging
 import asyncio
 from dotenv import load_dotenv
-from discord.ext import commands
+from discord.ext import commands, tasks
 from constants import MEME_SUBREDDIT_LIST
+
+# --- LOGGING SETUP ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # This will output to the console
+    ]
+)
 
 # --- LOAD ENVIRONMENT VARIABLES ---
 load_dotenv()
@@ -58,6 +67,9 @@ async def on_ready():
 
     try:
         logging.info(f"Logged into Reddit as {await reddit.user.me()}")
+        if not post_meme_burst.is_running():
+            post_meme_burst.start()
+            logging.info("Periodic 5-meme burst task has started.")
     except Exception as e:
         logging.info(f"Failed to log into Reddit: {e}")
     logging.info('-------------------------------------------------')
@@ -111,6 +123,48 @@ async def meme_bomb(ctx):
 
     await ctx.send(f"✅ Meme bomb complete! Deployed {memes_sent} memes.")
     logging.info(f"✅ Meme bomb complete! Deployed {memes_sent} memes.")
+
+
+# Periodic meme posting
+@tasks.loop(hours=12)
+async def post_meme_burst():
+    """Posts a burst of 5 memes periodically"""
+
+    try:
+        # Step 1: Safely get the channel ID
+        channel_id_str = os.getenv('BURST_MEME_CHANNEL_ID') or os.getenv('MEME_CHANNEL_ID')
+        if not channel_id_str:
+            logging.error("Error: Neither BURST_MEME_CHANNEL_ID nor MEME_CHANNEL_ID are set in environment variables.")
+            return  # Stop this loop iteration if no ID is found
+
+        channel_id = int(channel_id_str)
+        channel = bot.get_channel(channel_id)
+
+        if not channel:
+            logging.error(f"Error: Burst meme channel with ID {channel_id} not found.")
+            return
+
+        # Step 2: Run the main logic
+        await channel.send("🔥 **Periodic Meme Burst!** 🔥 Here are 5 fresh memes for you:")
+        logging.info(f"Starting scheduled 5-meme burst for channel {channel.name}")
+
+        for i in range(5):
+            random_subreddit = random.choice(MEME_SUBREDDIT_LIST)
+            post, error = await get_meme(random_subreddit)
+
+            if error:
+                await channel.send(f"Could not fetch meme #{i + 1}. Reason: {error}")
+                continue
+
+            await channel.send(f"**{post.title}** (from r/{random_subreddit})\n{post.url}")
+            # A small delay to avoid rate-limiting issues
+            await asyncio.sleep(1)
+
+        logging.info("Finished scheduled meme burst.")
+
+    except Exception as e:
+        # Catch any other unexpected errors and log them, so the loop doesn't die.
+        logging.error(f"An unexpected error occurred in the meme burst task: {e}", exc_info=True)
 
 
 # --- RUN THE BOT ---
