@@ -2,7 +2,10 @@ import os
 import discord
 import asyncpraw
 import random
+import asyncio
 from dotenv import load_dotenv
+from discord.ext import commands
+from constants import MEME_SUBREDDIT_LIST
 
 # --- LOAD ENVIRONMENT VARIABLES ---
 load_dotenv()
@@ -14,22 +17,36 @@ REDDIT_USERNAME = os.getenv('REDDIT_USERNAME')
 REDDIT_PASSWORD = os.getenv('REDDIT_PASSWORD')
 
 # --- BOT SETUP ---
+# Use commands.Bot instead of discord.Client
 intents = discord.Intents.default()
 intents.message_content = True
-client = discord.Client(intents=intents)
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Declare reddit client in the global scope but initialize it later
+# We will initialize the Reddit client when the bot is ready
 reddit = None
 
 
+# --- HELPER FUNCTION TO GET A MEME ---
+async def get_meme(subreddit_name):
+    """Fetches a random hot meme from a given subreddit."""
+    try:
+        subreddit = await reddit.subreddit(subreddit_name)
+        hot_posts = [post async for post in subreddit.hot(limit=100) if not post.stickied]
+        if not hot_posts:
+            return None, f"Could not find any hot posts in r/{subreddit_name}."
+        return random.choice(hot_posts), None
+    except Exception as e:
+        return None, f"Could not access subreddit r/{subreddit_name}. It might be private or banned. Error: {e}"
+
+
 # --- BOT EVENTS ---
-@client.event
+@bot.event
 async def on_ready():
-    global reddit  # Use the global reddit variable
-    print(f'We have logged in as {client.user}')
+    global reddit
+    print(f'We have logged in as {bot.user}')
     print('MemeBot is now online!')
 
-    # Initialize the Reddit client here, inside the async context
+    # Initialize the Reddit client
     reddit = asyncpraw.Reddit(
         client_id=REDDIT_CLIENT_ID,
         client_secret=REDDIT_CLIENT_SECRET,
@@ -39,53 +56,58 @@ async def on_ready():
     )
 
     try:
-        # A quick check to confirm Reddit login was successful
         print(f"Logged into Reddit as {await reddit.user.me()}")
     except Exception as e:
         print(f"Failed to log into Reddit: {e}")
     print('-------------------------------------------------')
 
 
-@client.event
-async def on_message(message):
-    # Ignore messages from the bot itself and prevent commands before reddit is ready
-    if message.author == client.user or reddit is None:
+# --- BOT COMMANDS ---
+@bot.command(name='meme', help='Posts a random meme from a default list of subreddits.')
+async def meme(ctx):
+    # Choose a random subreddit from our constants file
+    random_subreddit = random.choice(MEME_SUBREDDIT_LIST)
+    await ctx.send(f"Searching for a meme in r/{random_subreddit}...")
+
+    random_post, error = await get_meme(random_subreddit)
+
+    if error:
+        await ctx.send(error)
         return
 
-    if message.content.startswith('!meme'):
-        await message.channel.send("Hold on, finding a spicy meme...")
-        try:
-            subreddit_name = 'desimemes'
-            subreddit = await reddit.subreddit(subreddit_name)
+    post_url = random_post.url
 
-            # Fetch hot posts and filter out any stickied/pinned posts
-            hot_posts = [post async for post in subreddit.hot(limit=100) if not post.stickied]
+    if post_url.endswith(('.jpg', '.jpeg', '.png', '.gif')):
+        embed = discord.Embed(title=random_post.title, url=f"https://reddit.com{random_post.permalink}",
+                              color=discord.Color.blue())
+        embed.set_image(url=post_url)
+        embed.set_footer(text=f"👍 {random_post.score} | 💬 {random_post.num_comments} | r/{random_subreddit}")
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send(f"**{random_post.title}**\n{post_url}")
 
-            if not hot_posts:
-                await message.channel.send(f"Couldn't find any non-pinned hot posts in r/{subreddit_name} right now.")
-                return
 
-            random_post = random.choice(hot_posts)
+@bot.command(name='memebomb', help='Posts 20 memes from the 5 default subreddits.')
+async def meme_bomb(ctx):
+    await ctx.send(f"🔥 MEME BOMB INCOMING! Fetching 20 memes from our top channels... 🔥")
 
-            # Create and send the embed
-            embed = discord.Embed(
-                title=random_post.title,
-                url=f"https://reddit.com{random_post.permalink}",
-                color=discord.Color.blue()
-            )
-            embed.set_image(url=random_post.url)
-            embed.set_footer(text=f"👍 {random_post.score} | 💬 {random_post.num_comments} | r/{subreddit_name}")
+    memes_sent = 0
+    for subreddit_name in MEME_SUBREDDIT_LIST:
+        # Get 4 memes from each of the 5 subreddits (4 * 5 = 20)
+        for _ in range(4):
+            post, error = await get_meme(subreddit_name)
+            if error:
+                await ctx.send(error)
+                continue
 
-            await message.channel.send(embed=embed)
+            # To avoid spamming embeds, we'll just post the links for the bomb
+            await ctx.send(f"**{post.title}** (from r/{subreddit_name})\n{post.url}")
+            memes_sent += 1
+            # A small delay to avoid rate-limiting issues
+            await asyncio.sleep(1)
 
-        except Exception as e:
-            await message.channel.send(f"Sorry, I ran into an error: {e}")
+    await ctx.send(f"✅ Meme bomb complete! Deployed {memes_sent} memes.")
 
 
 # --- RUN THE BOT ---
-try:
-    client.run(DISCORD_TOKEN)
-except discord.errors.LoginFailure:
-    print("ERROR: Failed to log in. The Discord token is incorrect or invalid.")
-except Exception as e:
-    print(f"An unexpected error occurred: {e}")
+bot.run(DISCORD_TOKEN)
