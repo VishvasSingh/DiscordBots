@@ -2,6 +2,7 @@ import os
 import discord
 import asyncpraw
 import random
+import logging
 import asyncio
 from dotenv import load_dotenv
 from discord.ext import commands
@@ -43,8 +44,8 @@ async def get_meme(subreddit_name):
 @bot.event
 async def on_ready():
     global reddit
-    print(f'We have logged in as {bot.user}')
-    print('MemeBot is now online!')
+    logging.info(f'We have logged in as {bot.user}')
+    logging.info('MemeBot is now online!')
 
     # Initialize the Reddit client
     reddit = asyncpraw.Reddit(
@@ -56,10 +57,10 @@ async def on_ready():
     )
 
     try:
-        print(f"Logged into Reddit as {await reddit.user.me()}")
+        logging.info(f"Logged into Reddit as {await reddit.user.me()}")
     except Exception as e:
-        print(f"Failed to log into Reddit: {e}")
-    print('-------------------------------------------------')
+        logging.info(f"Failed to log into Reddit: {e}")
+    logging.info('-------------------------------------------------')
 
 
 # --- BOT COMMANDS ---
@@ -67,6 +68,7 @@ async def on_ready():
 async def meme(ctx):
     # Choose a random subreddit from our constants file
     random_subreddit = random.choice(MEME_SUBREDDIT_LIST)
+    logging.info(f"Looking for random meme in r/{random_subreddit}")
     await ctx.send(f"Searching for a meme in r/{random_subreddit}...")
 
     random_post, error = await get_meme(random_subreddit)
@@ -90,6 +92,7 @@ async def meme(ctx):
 @bot.command(name='memebomb', help='Posts 20 memes from the 5 default subreddits.')
 async def meme_bomb(ctx):
     await ctx.send(f"🔥 MEME BOMB INCOMING! Fetching 20 memes from our top channels... 🔥")
+    logging.info(f"Started fetching memes")
 
     memes_sent = 0
     for subreddit_name in MEME_SUBREDDIT_LIST:
@@ -107,6 +110,7 @@ async def meme_bomb(ctx):
             await asyncio.sleep(1)
 
     await ctx.send(f"✅ Meme bomb complete! Deployed {memes_sent} memes.")
+    logging.info(f"✅ Meme bomb complete! Deployed {memes_sent} memes.")
 
 
 # --- RUN THE BOT ---
